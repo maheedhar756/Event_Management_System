@@ -1,9 +1,7 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import Credentials from "next-auth/providers/credentials";
 import NextAuth, { type NextAuthOptions } from "next-auth";
 import { connectToDatabase } from "@/lib/db";
 import { User } from "@/models/user.model";
-import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 
 export const authOptions: NextAuthOptions = {
@@ -12,26 +10,39 @@ export const authOptions: NextAuthOptions = {
       name: "Credentials",
       credentials: {
         email: { label: "Email", type: "text", placeholder: "you@example.com" },
-        password: { label: "Password", type: "password" }
+        password: { label: "Password", type: "password" },
       },
 
-      async authorize(credentials): Promise<any> {
-        if(!credentials?.email || !credentials?.password) {
-          return NextResponse.json({ error: "Missing credentials" }, { status: 400 });
-        }
-        await connectToDatabase();
-        const user = await User.findOne({ email: credentials.email });
-        if(!user) {
-          return NextResponse.json({ error: "User not found" }, { status: 404 });
-        }
-        const isPasswordValid = await bcrypt.compare(credentials.password, user.password);
-        if(!isPasswordValid) {
-          return NextResponse.json({ error: "Invalid password" }, { status: 401 });
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) {
+          throw new Error("Email and Password are required");
         }
 
-        return NextResponse.json({ email: user.email, name: user.username }, { status: 200 });
-      }
-    })
+        await connectToDatabase();
+
+        const user = await User.findOne({ email: credentials.email });
+
+        if (!user) {
+          throw new Error("No user found with the provided email");
+        }
+
+        const isPasswordValid = await bcrypt.compare(
+          credentials.password,
+          user.password
+        );
+
+        if (!isPasswordValid) {
+          throw new Error("Invalid password");
+        }
+
+        return {
+          id: user._id.toString(),
+          email: user.email,
+          name: user.name,
+        };
+      },
+    }),
+
   ],
 
   session: {
@@ -42,8 +53,25 @@ export const authOptions: NextAuthOptions = {
     signIn: "/login",
   },
 
+  callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.user = user;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (token.user) {
+        session.user = token.user;
+      }
+      return session;
+    },
+  },
+
   secret: process.env.NEXTAUTH_SECRET,
 };
 
 const handler = NextAuth(authOptions);
+
+
 export { handler as GET, handler as POST };
